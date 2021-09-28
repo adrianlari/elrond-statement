@@ -1,0 +1,12 @@
+{
+  "name": "site-edge-viewer",
+  "description": "IP restricnt and add root document to the CF requests",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "private": true,
+  "dependencies": {}
+}

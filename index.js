@@ -11,7 +11,6 @@ var inputAddress = document.getElementById("address");
 var btnGetStatement = document.getElementById("btnGetStatement");
 var divError = document.getElementById("errorMessage");
 var filterValue = document.getElementById("filter-values");
-console.log(filterValue);
 
 //let firstTimeNormalTrans = true;
 //let firstTimeScTrans = true;

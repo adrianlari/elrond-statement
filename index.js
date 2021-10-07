@@ -2,10 +2,12 @@ const axios = require("axios");
 require("babel-core/register");
 require("babel-polyfill");
 
-const baseUrl = "https://testnet-index.elrond.com";
-const condition = "condition=should&size=10000&scroll=1m";
-const url = `${baseUrl}/transactions/_search`;
-const urlScTransactions = `${baseUrl}/scresults/_search`;
+const baseUrl = "https://devnet-index.elrond.com";
+
+const url = `${baseUrl}/transactions/_search?scroll=1m`;
+const urlScTransactions = `${baseUrl}/scresults/_search?scroll=1m`;
+
+const noIndexUrl = `${baseUrl}/_search/scroll`;
 
 var inputAddress = document.getElementById("address");
 var btnGetStatement = document.getElementById("btnGetStatement");
@@ -13,23 +15,19 @@ var divError = document.getElementById("errorMessage");
 var filterValue = document.getElementById("filter-values");
 
 let firstTimeNormalTrans = true;
-//let firstTimeScTrans = true;
+let firstTimeScTrans = true;
 let csvData = "";
 let showZeroValues = false;
 
 let allTransactions;
 let allTransactionsSortedByTimestamp;
-//let allTransactionsFilteredByValue;
-
-//let isRefreshing = false;
 
 let address;
-let fromIndex = 0;
 const size = 10000;
-const scrollId = " ";
 
-const refreshFromIndex = () => {
-  fromIndex = 0;
+const refresh = () => {
+  firstTimeNormalTrans = true;
+  firstTimeScTrans = true;
 }
 
 const trimAddress = (address) => {
@@ -80,7 +78,6 @@ const formatScTransactions = (resultScTransactionsRaw) => {
       receiver: row._source.receiver,
       senderTrimmed: trimAddress(row._source.sender),
       receiverTrimmed: trimAddress(row._source.receiver),
-      // data: row.data,
       value: formatValue(row._source.value),
       timestamp: formatToDate(row._source.timestamp),
       status: "success",
@@ -91,7 +88,6 @@ const formatScTransactions = (resultScTransactionsRaw) => {
 }
 
 const formatSimpleTransactions = (someResultTransactionsRaw) => {
-
   const transactions = someResultTransactionsRaw
     .filter((row) => (showZeroValues ? row : row._source.value !== "0"))
     .map((row) => ({
@@ -112,9 +108,8 @@ const formatSimpleTransactions = (someResultTransactionsRaw) => {
   return transactions;
 }
 
-const getBody = (address, fromIndex) => {
+const getBody = (address) => {
   const body = {
-    from: fromIndex,
     size: size,
     query: {
       bool: {
@@ -150,10 +145,9 @@ const getScrollBody = (scrollId) => {
 }
 
 const getAllSimpleTransactions = async (address) => {
-  let body = getBody(address, fromIndex);
+  let body = getBody(address);
 
   let someResultTransactionsRaw = await getSimpleTransactions(body);
-  // console.log(someResultTransactionsRaw);
 
   if (!someResultTransactionsRaw.data.hits.hits.length) {
     return;
@@ -163,28 +157,24 @@ const getAllSimpleTransactions = async (address) => {
   someResultTransactionsRaw.data.hits.hits.map((row) => allSimpleTransactionsRaw.push(row));
 
   while (someResultTransactionsRaw.data.hits.hits.length === size) {
-    // const scrollId = someResultTransactionsRaw.data._scroll_id;
-    // console.log(scrollId);
-    // let scrollBody = getScrollBody(scrollId);
-    // console.log(scrollBody);
-    fromIndex += size;
-    body = getBody(address, fromIndex);
-    someResultTransactionsRaw = await getSimpleTransactions(body);
+
+    const scrollId = someResultTransactionsRaw.data._scroll_id;
+    let scrollBody = getScrollBody(scrollId);
+
+    someResultTransactionsRaw = await getSimpleTransactions(scrollBody);
 
     if (someResultTransactionsRaw.data.hits.hits.length) {
       someResultTransactionsRaw.data.hits.hits.map((row) => allSimpleTransactionsRaw.push(row));
     }
-    // allSimpleTransactionsRaw.push(someResultTransactionsRaw.data.hits.hits);
   }
-  refreshFromIndex();
 
   return allSimpleTransactionsRaw;
 }
 
 const getAllScTransactions = async (address) => {
-  let body = getBody(address, fromIndex);
+  let body = getBody(address);
 
-  let someScResultTransactionsRaw = await getScTransactions(body, null);
+  let someScResultTransactionsRaw = await getScTransactions(body);
 
   if (!someScResultTransactionsRaw.data.hits.hits.length) {
     return;
@@ -194,73 +184,58 @@ const getAllScTransactions = async (address) => {
   someScResultTransactionsRaw.data.hits.hits.map((row) => allScTransactionsRaw.push(row));
 
   while (someScResultTransactionsRaw.data.hits.hits.length === size) {
-    // const scrollId = someScResultTransactionsRaw.data._scroll_id;
-    // console.log(scrollId);
-    // let scrollBody = getScrollBody(scrollId);
-    // console.log(scrollBody);
-    fromIndex += size;
-    body = getBody(address, fromIndex);
-    someScResultTransactionsRaw = await getScTransactions(body);
+    const scrollId = someScResultTransactionsRaw.data._scroll_id;
+    let scrollBody = getScrollBody(scrollId);
+
+    someScResultTransactionsRaw = await getScTransactions(scrollBody);
 
     if (someScResultTransactionsRaw.data.hits.hits.length) {
       someScResultTransactionsRaw.data.hits.hits.map((row) => allScTransactionsRaw.push(row));
     }
   }
 
-  refreshFromIndex();
-
   return allScTransactionsRaw;
 }
 
-const getScTransactions = async (body, scrollBody) => {
+const getScTransactions = async (neededBody) => {
   let someScResultTransactionsRaw;
 
-  // if (firstTimeScTrans) {
-  someScResultTransactionsRaw = await axios.post(urlScTransactions, body);
-  // console.log(someScResultTransactionsRaw);
-  // firstTimeScTrans = false;
-  // } else {
-  // console.log("before scroll");
-  //someScResultTransactionsRaw =   axios.post(urlScTransactions, scrollBody);
-  // console.log("after scroll");
-  // }
+  if (firstTimeScTrans) {
+    someScResultTransactionsRaw = await axios.post(urlScTransactions, neededBody);
+    firstTimeScTrans = false;
+  } else {
+    someScResultTransactionsRaw = axios.post(noIndexUrl, neededBody);
+  }
 
   return someScResultTransactionsRaw;
 }
 
 const getSimpleTransactions = async (neededBody) => {
   let someResultTransactionsRaw;
-  // console.log(neededBody);
 
-  someResultTransactionsRaw = await axios.post(url, neededBody);
-  // if (firstTimeNormalTrans) {
-  //   someResultTransactionsRaw = await axios.post(url, neededBody);
-  //   firstTimeNormalTrans = false;
-  //   console.log(someResultTransactionsRaw);
-  // } else {
-  //   console.log("before scroll");
-  //   const urlnew = `${baseUrl}/transactions/_search?scroll`;
-  //   someResultTransactionsRaw = await axios.post(urlnew, neededBody);
-  //   console.log("after scroll");
-  // }
-  // console.log("first");
+  if (firstTimeNormalTrans) {
+    someResultTransactionsRaw = await axios.post(url, neededBody);
+    firstTimeNormalTrans = false;
+  } else {
+    someResultTransactionsRaw = await axios.post(noIndexUrl, neededBody);
+  }
 
   return someResultTransactionsRaw;
 };
 
 const getAllTransactions = async () => {
-  //let body = getBody(address);
 
   const allSimpleTransactionsRaw = await getAllSimpleTransactions(address);
   const allScTransactionsRaw = await getAllScTransactions(address);
 
-  const allSimpleTransactions = formatSimpleTransactions(allSimpleTransactionsRaw);
-  const allScTransactions = formatScTransactions(allScTransactionsRaw);
+  console.log({ allSimpleTransactionsRaw });
+  console.log({ allScTransactionsRaw });
 
-  //in mod repetat ,   axios.post(url, bodyCuScroll)
-  // if (resultScTransactionsRaw.data.hits.hits.length === 10000) {
-  //     setScrollId(resultScTransactionsRaw.data._scroll_id);
-  // }
+  const allSimpleTransactions = allSimpleTransactionsRaw ? formatSimpleTransactions(allSimpleTransactionsRaw) : new Array();
+  const allScTransactions = allScTransactionsRaw ? formatScTransactions(allScTransactionsRaw) : new Array();
+
+  console.log({ allSimpleTransactions });
+  console.log({ allScTransactions });
 
   const allTransactions = allSimpleTransactions.concat(allScTransactions);
 
@@ -301,35 +276,23 @@ const setCsvData = () => {
 
 const getStatement = async () => {
   address = inputAddress.value;
-  //  refreshData();
-  if (!address) return;
+
+  if (!address) {
+    inputAddress.classList.toggle("is-invalid");
+    divError.textContent = "Enter a valid address";
+    return;
+  }
 
   btnGetStatement.innerHTML = `<div class="spinner-border text-success"></div>`;
   await fetchTransactions();
   allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(allTransactions);
 
-  // console.log(allTransactionsSortedByTimestamp);
   setCsvData();
 
   downloadStatement();
 
+  refresh();
   btnGetStatement.innerHTML = `Get Statement`;
-  //getAllTransactions();
-
-  //   getAllTransactions();
-  // window.location = hookHandler(address);
-  // console.log(hookHandler(address));
-  // usernameSchema
-  //     .validate({ address })
-  //     .then((address) => {
-  //         console.log("hook link");
-  //         console.log(window.location);
-  //         window.location = hookHandler(username.username);
-  //     })
-  //     .catch((error) => {
-  //         inputAddress.classList.toggle("is-invalid");
-  //         divError.textContent = error.message;
-  //     });
 }
 
 btnGetStatement.onclick = () => { (() => { getStatement() })() };

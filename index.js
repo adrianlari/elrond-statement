@@ -156,11 +156,10 @@ const getAllSimpleTransactions = async (address) => {
   let allSimpleTransactionsRaw = new Array();
   someResultTransactionsRaw.data.hits.hits.map((row) => allSimpleTransactionsRaw.push(row));
 
+  const scrollId = someResultTransactionsRaw.data._scroll_id;
+  let scrollBody = getScrollBody(scrollId);
+
   while (someResultTransactionsRaw.data.hits.hits.length === size) {
-
-    const scrollId = someResultTransactionsRaw.data._scroll_id;
-    let scrollBody = getScrollBody(scrollId);
-
     someResultTransactionsRaw = await getSimpleTransactions(scrollBody);
 
     if (someResultTransactionsRaw.data.hits.hits.length) {
@@ -183,10 +182,10 @@ const getAllScTransactions = async (address) => {
   let allScTransactionsRaw = new Array();
   someScResultTransactionsRaw.data.hits.hits.map((row) => allScTransactionsRaw.push(row));
 
-  while (someScResultTransactionsRaw.data.hits.hits.length === size) {
-    const scrollId = someScResultTransactionsRaw.data._scroll_id;
-    let scrollBody = getScrollBody(scrollId);
+  const scrollId = someScResultTransactionsRaw.data._scroll_id;
+  let scrollBody = getScrollBody(scrollId);
 
+  while (someScResultTransactionsRaw.data.hits.hits.length === size) {
     someScResultTransactionsRaw = await getScTransactions(scrollBody);
 
     if (someScResultTransactionsRaw.data.hits.hits.length) {
@@ -204,7 +203,7 @@ const getScTransactions = async (neededBody) => {
     someScResultTransactionsRaw = await axios.post(urlScTransactions, neededBody);
     firstTimeScTrans = false;
   } else {
-    someScResultTransactionsRaw = axios.post(noIndexUrl, neededBody);
+    someScResultTransactionsRaw = await axios.post(noIndexUrl, neededBody);
   }
 
   return someScResultTransactionsRaw;

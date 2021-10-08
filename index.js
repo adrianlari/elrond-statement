@@ -1,6 +1,5 @@
-const axios = require("axios");
-require("babel-core/register");
-require("babel-polyfill");
+import 'regenerator-runtime/runtime';
+import axios from "axios";
 
 const baseUrl = "https://devnet-index.elrond.com";
 
@@ -14,20 +13,16 @@ var btnGetStatement = document.getElementById("btnGetStatement");
 var divError = document.getElementById("errorMessage");
 var filterValue = document.getElementById("filter-values");
 
-let firstTimeNormalTrans = true;
-let firstTimeScTrans = true;
+let isFirstTimeNormalTrans = true;
+let isFirstTimeScTrans = true;
 let csvData = "";
 let showZeroValues = false;
-
-let allTransactions;
-let allTransactionsSortedByTimestamp;
-
 let address;
 const size = 10000;
 
 const refresh = () => {
-  firstTimeNormalTrans = true;
-  firstTimeScTrans = true;
+  isFirstTimeNormalTrans = true;
+  isFirstTimeScTrans = true;
 }
 
 const trimAddress = (address) => {
@@ -144,8 +139,8 @@ const getScrollBody = (scrollId) => {
   return scrollBody;
 }
 
-const getAllSimpleTransactions = async (address) => {
-  let body = getBody(address);
+const getAllSimpleTransactions = async () => {
+  const body = getBody(address);
 
   let someResultTransactionsRaw = await getSimpleTransactions(body);
 
@@ -157,7 +152,7 @@ const getAllSimpleTransactions = async (address) => {
   someResultTransactionsRaw.data.hits.hits.map((row) => allSimpleTransactionsRaw.push(row));
 
   const scrollId = someResultTransactionsRaw.data._scroll_id;
-  let scrollBody = getScrollBody(scrollId);
+  const scrollBody = getScrollBody(scrollId);
 
   while (someResultTransactionsRaw.data.hits.hits.length === size) {
     someResultTransactionsRaw = await getSimpleTransactions(scrollBody);
@@ -170,7 +165,7 @@ const getAllSimpleTransactions = async (address) => {
   return allSimpleTransactionsRaw;
 }
 
-const getAllScTransactions = async (address) => {
+const getAllScTransactions = async () => {
   let body = getBody(address);
 
   let someScResultTransactionsRaw = await getScTransactions(body);
@@ -199,9 +194,9 @@ const getAllScTransactions = async (address) => {
 const getScTransactions = async (neededBody) => {
   let someScResultTransactionsRaw;
 
-  if (firstTimeScTrans) {
+  if (isFirstTimeScTrans) {
     someScResultTransactionsRaw = await axios.post(urlScTransactions, neededBody);
-    firstTimeScTrans = false;
+    isFirstTimeScTrans = false;
   } else {
     someScResultTransactionsRaw = await axios.post(noIndexUrl, neededBody);
   }
@@ -212,9 +207,9 @@ const getScTransactions = async (neededBody) => {
 const getSimpleTransactions = async (neededBody) => {
   let someResultTransactionsRaw;
 
-  if (firstTimeNormalTrans) {
+  if (isFirstTimeNormalTrans) {
     someResultTransactionsRaw = await axios.post(url, neededBody);
-    firstTimeNormalTrans = false;
+    isFirstTimeNormalTrans = false;
   } else {
     someResultTransactionsRaw = await axios.post(noIndexUrl, neededBody);
   }
@@ -224,8 +219,8 @@ const getSimpleTransactions = async (neededBody) => {
 
 const getAllTransactions = async () => {
 
-  const allSimpleTransactionsRaw = await getAllSimpleTransactions(address);
-  const allScTransactionsRaw = await getAllScTransactions(address);
+  const allSimpleTransactionsRaw = await getAllSimpleTransactions();
+  const allScTransactionsRaw = await getAllScTransactions();
 
   console.log({ allSimpleTransactionsRaw });
   console.log({ allScTransactionsRaw });
@@ -257,20 +252,11 @@ const downloadStatement = () => {
 }
 
 const changeShowZeroValues = () => {
-  if (filterValue.checked) {
-    showZeroValues = true;
-  }
-  else {
-    showZeroValues = false;
-  }
+  showZeroValues = filterValue.checked;
 }
 
-const fetchTransactions = async () => {
-  allTransactions = await getAllTransactions();
-}
-
-const setCsvData = () => {
-  csvData = arrayToCsv(allTransactionsSortedByTimestamp);
+const setCsvData = (transactionsArray) => {
+  csvData = arrayToCsv(transactionsArray);
 }
 
 const getStatement = async () => {
@@ -283,10 +269,12 @@ const getStatement = async () => {
   }
 
   btnGetStatement.innerHTML = `<div class="spinner-border text-success"></div>`;
-  await fetchTransactions();
-  allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(allTransactions);
+  const allTransactions = await getAllTransactions();
+  const allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(allTransactions);
 
-  setCsvData();
+  console.log(allTransactionsSortedByTimestamp);
+
+  setCsvData(allTransactionsSortedByTimestamp);
 
   downloadStatement();
 

@@ -22,6 +22,7 @@ const size = 10000;
 
 let balance = 0;
 let totalGasUsed = 0;
+let fees = 0;
 
 btnGetStatement.onclick = async () => getStatement();
 
@@ -44,7 +45,7 @@ const getStatement = async () => {
 
   setCsvData(allTransactionsSortedByTimestamp);
 
-  downloadStatement();
+  //downloadStatement();
 
   refresh();
   btnGetStatement.innerHTML = `Get Statement`;
@@ -65,10 +66,48 @@ const getValueNonf = (sender, receiver, value) => {
   return value;
 }
 
+const isSmartContract = (address) => {
+  if ((address.match(/q/g) || []).length - 1 >= 13) {
+    console.log(address + " is a SC");
+    return true;
+  }
+
+  return false;
+}
+
 const getAllTransactions = async () => {
+
+  // console.log(apiTransactions);
 
   const allSimpleTransactionsRaw = await getAllSimpleTransactions();
   const allScTransactionsRaw = await getAllScTransactions();
+
+  const sumaPunct1 = -allSimpleTransactionsRaw
+    .filter((row) => row._source.sender === address && row._source.receiver !== address && row._source.status === "success")
+    .map((row) => parseInt(row._source.value) / (10 ** 18))
+    .reduce((a, b) => a + b, 0);
+  console.log({ sumaPunct1 });
+
+  const sumaPunct2 = allSimpleTransactionsRaw
+    .filter((row) => row._source.sender !== address && row._source.receiver === address && row._source.status === "success")
+    .map((row) => parseInt(row._source.value) / (10 ** 18))
+    .reduce((a, b) => a + b, 0);
+  console.log({ sumaPunct2 });
+
+  const sumaPunct3 = -allSimpleTransactionsRaw
+    .filter((row) => row._source.sender === address)
+    .map((row) => parseInt(row._source.fee) / (10 ** 18))
+    .reduce((a, b) => a + b, 0);
+  console.log({ sumaPunct3 });
+
+  const sumaPunct4 = allScTransactionsRaw
+    .filter((row) => row._source.receiver === address)
+    .map((row) => parseInt(row._source.value) / (10 ** 18))
+    .reduce((a, b) => a + b, 0);
+  console.log({ sumaPunct4 });
+
+  const anotherBalance = sumaPunct1 + sumaPunct2 + sumaPunct3 + sumaPunct4;
+  console.log({ anotherBalance });
 
   console.log({ allSimpleTransactionsRaw });
   console.log({ allScTransactionsRaw });
@@ -79,8 +118,11 @@ const getAllTransactions = async () => {
   const allSimpleTransactions = allSimpleTransactionsRaw ? formatSimpleTransactions(allSimpleTransactionsRaw) : new Array();
   const allScTransactions = allScTransactionsRaw ? formatScTransactions(allScTransactionsRaw) : new Array();
 
-  allSimpleTransactions.map((row) => totalGasUsed += row.gas);
-  console.log({ totalGasUsed });
+  allSimpleTransactions.map((row) => {
+    totalGasUsed += row.gas;
+    fees += row.fee
+  });
+
 
   //totalGasUsed /= (10 ** 18);
   //console.log({ totalGasUsed });
@@ -89,9 +131,17 @@ const getAllTransactions = async () => {
   //console.log({ allScTransactions });
 
   const allTransactions = allSimpleTransactions.concat(allScTransactions);
-  allTransactions.map((row) => row.status === "success" ? balance += row.value : balance += 0);
+  allTransactions.map((row) => (row.status).toString() === "success" ? balance += row.value : balance += 0);
+
+  console.log({ totalGasUsed });
+  console.log({ fees });
+  console.log({ balance });
+
+  const remainingBalance = balance - fees;
+  console.log({ remainingBalance });
+
   console.log(allTransactions);
-  console.log(parseFloat(balance) - totalGasUsed);
+  //console.log(parseFloat(balance) - totalGasUsed);
   // allTransactions.map((row) => {
   //   // balance += row.value;
   //   totalGasUsed += row.gas ? row.gas : 0;
@@ -189,6 +239,7 @@ const refresh = () => {
   isFirstTimeScTrans = true;
   balance = 0;
   totalGasUsed = 0;
+  fees = 0;
 }
 
 const trimAddress = (address) => {
@@ -229,9 +280,22 @@ const getValue = (sender, receiver, value) => {
     return 0;
   }
 
-  if (address === sender) {
+  // if (address === sender && isSmartContract(receiver)) {
+  //   return value / (10 ** 18);
+  // }
+
+  // if (isSmartContract(sender) && (receiver === address)) {
+  //   return (-value) / (10 ** 18);
+  // }
+
+  if (sender === address) {
     value = -value;
+    //    return (-value) / (10 ** 18);
   }
+
+  // if (receiver === address) {
+  // //  return value / (10 ** 18);
+  // }
 
   const formattedValue = value / (10 ** 18);
 
@@ -255,7 +319,7 @@ const formatScTransactions = (resultScTransactionsRaw) => {
       receiver: row._source.receiver,
       senderTrimmed: trimAddress(row._source.sender),
       receiverTrimmed: trimAddress(row._source.receiver),
-      value: 0,//getValue(row._source.sender, row._source.receiver, row._source.value),
+      value: row._source.receiver === address ? row._source.value / (10 ** 18) : 0,//getValue(row._source.sender, row._source.receiver, row._source.value),
       timestamp: formatToDate(row._source.timestamp),
       status: "success",
       type: "scResult",
@@ -275,9 +339,7 @@ const formatSimpleTransactions = (someResultTransactionsRaw) => {
       receiver: row._source.receiver,
       senderTrimmed: trimAddress(row._source.sender),
       receiverTrimmed: trimAddress(row._source.receiver),
-      data: row._source.data
-        ? Buffer.from(row._source.data, "base64").toString("binary")
-        : "",
+      data: row._source.data ? Buffer.from(row._source.data, "base64").toString("binary") : "",
       value: getValue(row._source.sender, row._source.receiver, row._source.value),
       timestamp: formatToDate(row._source.timestamp),
       status: row._source.status,

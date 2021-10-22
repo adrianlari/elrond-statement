@@ -1,7 +1,7 @@
-import 'regenerator-runtime/runtime';
+import "regenerator-runtime/runtime";
 import axios from "axios";
 
-const baseUrl = "https://devnet-index.elrond.com";
+const baseUrl = "https://testnet-index.elrond.com";
 
 const url = `${baseUrl}/transactions/_search?scroll=1m`;
 const urlScTransactions = `${baseUrl}/scresults/_search?scroll=1m`;
@@ -11,22 +11,39 @@ const noIndexUrl = `${baseUrl}/_search/scroll`;
 var inputAddress = document.getElementById("address");
 var btnGetStatement = document.getElementById("btnGetStatement");
 var divError = document.getElementById("errorMessage");
-var filterValue = document.getElementById("filter-values");
 
-let isFirstTimeNormalTrans = true;
-let isFirstTimeScTrans = true;
+let isFirstTime = true;
 let csvData = "";
-let showZeroValues = false;
 let address;
-const size = 10000;
-
-let balance = 0;
-let totalGasUsed = 0;
-let fees = 0;
+const MAXIMUM_NUMBER_OF_ROWS = 10000;
+const ok = "QDZmNm";
 
 btnGetStatement.onclick = async () => getStatement();
 
-filterValue.onclick = () => changeShowZeroValues();
+const transactionTypes = {
+  TRANSACTION: "Transaction",
+  RESULT: "Result",
+};
+
+const actionTypes = {
+  SEND: "Sent",
+  RECEIVED: "Received",
+  SELF: "Self",
+};
+
+const status = {
+  SUCCESS: "success",
+  FAIL: "fail",
+  INVALID: "invalid",
+};
+
+const showSpinner = () => {
+  btnGetStatement.innerHTML = `<div class="spinner-border text-success"></div>`;
+};
+
+const hideSpinner = () => {
+  btnGetStatement.innerHTML = `Get Statement`;
+};
 
 const getStatement = async () => {
   address = inputAddress.value;
@@ -37,323 +54,307 @@ const getStatement = async () => {
     return;
   }
 
-  btnGetStatement.innerHTML = `<div class="spinner-border text-success"></div>`;
-  const allTransactions = await getAllTransactions();
-  const allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(allTransactions);
+  showSpinner();
 
-  console.log(allTransactionsSortedByTimestamp);
+  const allTransactionsFormatted = await getAllFormattedTransactions();
+  const allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(
+    allTransactionsFormatted
+  );
 
   setCsvData(allTransactionsSortedByTimestamp);
 
-  //downloadStatement();
+  downloadStatement();
 
-  refresh();
-  btnGetStatement.innerHTML = `Get Statement`;
-}
+  hideSpinner();
+};
 
-const getValueNonf = (sender, receiver, value) => {
-  if (sender === receiver) {
-    return 0;
-  }
+const getAllFormattedTransactions = async () => {
+  const allSimpleTransactionsRaw = await getAllTransactionsRaw(
+    transactionTypes.TRANSACTION
+  );
 
-  if (address === sender) {
-    value = -value;
-  }
+  const totalSent = allSimpleTransactionsRaw
+    .filter(
+      (row) =>
+        row._source.sender === address &&
+        row._source.receiver !== address &&
+        row._source.status === "success"
+    )
+    .map((row) => BigInt(String(row._source.value)))
+    .reduce((a, b) => a + b, BigInt(0));
 
-  //const formattedValue = value / (10 ** 18);
-  value = parseInt(value);
+  const totalReceived = allSimpleTransactionsRaw
+    .filter(
+      (row) =>
+        row._source.sender !== address &&
+        row._source.receiver === address &&
+        row._source.status === "success"
+    )
+    .map((row) => BigInt(String(row._source.value)))
+    .reduce((a, b) => a + b, BigInt(0));
 
-  return value;
-}
-
-const isSmartContract = (address) => {
-  if ((address.match(/q/g) || []).length - 1 >= 13) {
-    console.log(address + " is a SC");
-    return true;
-  }
-
-  return false;
-}
-
-const getAllTransactions = async () => {
-
-  // console.log(apiTransactions);
-
-  const allSimpleTransactionsRaw = await getAllSimpleTransactions();
-  const allScTransactionsRaw = await getAllScTransactions();
-
-  const sumaPunct1 = -allSimpleTransactionsRaw
-    .filter((row) => row._source.sender === address && row._source.receiver !== address && row._source.status === "success")
-    .map((row) => parseInt(row._source.value) / (10 ** 18))
-    .reduce((a, b) => a + b, 0);
-  console.log({ sumaPunct1 });
-
-  const sumaPunct2 = allSimpleTransactionsRaw
-    .filter((row) => row._source.sender !== address && row._source.receiver === address && row._source.status === "success")
-    .map((row) => parseInt(row._source.value) / (10 ** 18))
-    .reduce((a, b) => a + b, 0);
-  console.log({ sumaPunct2 });
-
-  const sumaPunct3 = -allSimpleTransactionsRaw
+  const totalFees = allSimpleTransactionsRaw
     .filter((row) => row._source.sender === address)
-    .map((row) => parseInt(row._source.fee) / (10 ** 18))
-    .reduce((a, b) => a + b, 0);
-  console.log({ sumaPunct3 });
+    .map((row) => BigInt(String(row._source.fee)))
+    .reduce((a, b) => a + b, BigInt(0));
 
-  const sumaPunct4 = allScTransactionsRaw
-    .filter((row) => row._source.receiver === address)
-    .map((row) => parseInt(row._source.value) / (10 ** 18))
-    .reduce((a, b) => a + b, 0);
-  console.log({ sumaPunct4 });
+  const allFormattedSimpleTransactions = allSimpleTransactionsRaw
+    ? formatTransactions(allSimpleTransactionsRaw, transactionTypes.TRANSACTION)
+    : new Array();
 
-  const anotherBalance = sumaPunct1 + sumaPunct2 + sumaPunct3 + sumaPunct4;
-  console.log({ anotherBalance });
+  let allScTransactionsRaw = await getAllTransactionsRaw(
+    transactionTypes.RESULT
+  );
 
-  console.log({ allSimpleTransactionsRaw });
-  console.log({ allScTransactionsRaw });
+  let totalReceivedFromScResult = BigInt(0);
 
-  // allSimpleTransactionsRaw.map((row) => balance += getValueNonf(row._source.sender, row._source.receiver, row._source.value));
-  // allScTransactionsRaw.map((row) => balance += getValueNonf(row._source.sender, row._source.receiver, row._source.value));
+  if (allScTransactionsRaw) {
+    allScTransactionsRaw = allScTransactionsRaw.filter(
+      (x) => x._source && x._source.data && !x._source.data.startsWith(ok)
+    );
 
-  const allSimpleTransactions = allSimpleTransactionsRaw ? formatSimpleTransactions(allSimpleTransactionsRaw) : new Array();
-  const allScTransactions = allScTransactionsRaw ? formatScTransactions(allScTransactionsRaw) : new Array();
+    totalReceivedFromScResult = allScTransactionsRaw
+      .map((x) => BigInt(String(x._source.value)))
+      .reduce((a, b) => a + b, BigInt(0));
+  }
 
-  allSimpleTransactions.map((row) => {
-    totalGasUsed += row.gas;
-    fees += row.fee
-  });
+  const balance =
+    totalReceived - totalSent - totalFees + totalReceivedFromScResult;
 
+  const statementDetails = {
+    totalReceived: totalReceived,
+    totalSent: totalSent,
+    totalFees: totalFees,
+    totalReceivedFromScResult: totalReceivedFromScResult,
+    balance: balance,
+    address: address,
+  };
 
-  //totalGasUsed /= (10 ** 18);
-  //console.log({ totalGasUsed });
+  console.log({ statementDetails });
 
-  console.log({ allSimpleTransactions });
-  //console.log({ allScTransactions });
+  const allFormattedScTransactions = allScTransactionsRaw
+    ? formatTransactions(allScTransactionsRaw, transactionTypes.RESULT)
+    : new Array();
 
-  const allTransactions = allSimpleTransactions.concat(allScTransactions);
-  allTransactions.map((row) => (row.status).toString() === "success" ? balance += row.value : balance += 0);
+  const allFormattedTransactions = allFormattedSimpleTransactions.concat(
+    allFormattedScTransactions
+  );
 
-  console.log({ totalGasUsed });
-  console.log({ fees });
-  console.log({ balance });
+  return allFormattedTransactions;
+};
 
-  const remainingBalance = balance - fees;
-  console.log({ remainingBalance });
+const appendContentToArray = (array, content) => {
+  content.data.hits.hits.map((row) => array.push(row));
+};
 
-  console.log(allTransactions);
-  //console.log(parseFloat(balance) - totalGasUsed);
-  // allTransactions.map((row) => {
-  //   // balance += row.value;
-  //   totalGasUsed += row.gas ? row.gas : 0;
-  // });
+const hasAnyTransactions = (array) => {
+  return array.data.hits.hits.length > 0;
+};
 
-  // console.log({ balance });
-  // console.log({ totalGasUsed });
-  // console.log(balance / (10 ** 18) - totalGasUsed);
+const isArrayFull = (array) => {
+  return array.data.hits.hits.length === MAXIMUM_NUMBER_OF_ROWS;
+};
 
-  return allTransactions;
-}
+const getAllTransactionsRaw = async (txType) => {
+  let body;
 
-const getAllSimpleTransactions = async () => {
-  const body = getBody(address);
+  if (txType === transactionTypes.TRANSACTION) {
+    body = getTransactionBody(address);
+  } else if (txType === transactionTypes.RESULT) {
+    body = getSCBody(address);
+  }
 
-  let someResultTransactionsRaw = await getSimpleTransactions(body);
+  isFirstTime = true;
+  let someTransactionsRaw = await getTransactions(body, txType);
 
-  if (!someResultTransactionsRaw.data.hits.hits.length) {
+  if (!hasAnyTransactions(someTransactionsRaw)) {
     return;
   }
 
-  let allSimpleTransactionsRaw = new Array();
-  someResultTransactionsRaw.data.hits.hits.map((row) => allSimpleTransactionsRaw.push(row));
+  let allTransactionsRaw = new Array();
+  appendContentToArray(allTransactionsRaw, someTransactionsRaw);
 
-  const scrollId = someResultTransactionsRaw.data._scroll_id;
-  const scrollBody = getScrollBody(scrollId);
-
-  while (someResultTransactionsRaw.data.hits.hits.length === size) {
-    someResultTransactionsRaw = await getSimpleTransactions(scrollBody);
-
-    if (someResultTransactionsRaw.data.hits.hits.length) {
-      someResultTransactionsRaw.data.hits.hits.map((row) => allSimpleTransactionsRaw.push(row));
-    }
-  }
-
-  //allSimpleTransactionsRaw.map((row) => { balance += parseInt(address === row._source.receiver ? row._source.value : 0) });
-
-  return allSimpleTransactionsRaw;
-}
-
-const getSimpleTransactions = async (neededBody) => {
-  let someResultTransactionsRaw;
-
-  if (isFirstTimeNormalTrans) {
-    someResultTransactionsRaw = await axios.post(url, neededBody);
-    isFirstTimeNormalTrans = false;
-  } else {
-    someResultTransactionsRaw = await axios.post(noIndexUrl, neededBody);
-  }
-
-  return someResultTransactionsRaw;
-}
-
-const getAllScTransactions = async () => {
-  let body = getBody(address);
-
-  let someScResultTransactionsRaw = await getScTransactions(body);
-
-  if (!someScResultTransactionsRaw.data.hits.hits.length) {
-    return;
-  }
-
-  let allScTransactionsRaw = new Array();
-  someScResultTransactionsRaw.data.hits.hits.map((row) => allScTransactionsRaw.push(row));
-
-  const scrollId = someScResultTransactionsRaw.data._scroll_id;
+  const scrollId = someTransactionsRaw.data._scroll_id;
   let scrollBody = getScrollBody(scrollId);
 
-  while (someScResultTransactionsRaw.data.hits.hits.length === size) {
-    someScResultTransactionsRaw = await getScTransactions(scrollBody);
+  while (isArrayFull(someTransactionsRaw)) {
+    someTransactionsRaw = await getTransactions(scrollBody);
 
-    if (someScResultTransactionsRaw.data.hits.hits.length) {
-      someScResultTransactionsRaw.data.hits.hits.map((row) => allScTransactionsRaw.push(row));
+    if (hasAnyTransactions(someTransactionsRaw)) {
+      appendContentToArray(allTransactionsRaw, someTransactionsRaw);
     }
   }
 
-  return allScTransactionsRaw;
-}
+  return allTransactionsRaw;
+};
 
-const getScTransactions = async (neededBody) => {
-  let someScResultTransactionsRaw;
+const getTransactions = async (neededBody, txType) => {
+  let someTransactionsRaw;
 
-  if (isFirstTimeScTrans) {
-    someScResultTransactionsRaw = await axios.post(urlScTransactions, neededBody);
-    isFirstTimeScTrans = false;
+  if (isFirstTime) {
+    someTransactionsRaw = await axios.post(
+      txType === transactionTypes.RESULT ? urlScTransactions : url,
+      neededBody
+    );
+    isFirstTime = false;
   } else {
-    someScResultTransactionsRaw = await axios.post(noIndexUrl, neededBody);
+    someTransactionsRaw = await axios.post(noIndexUrl, neededBody);
   }
 
-  return someScResultTransactionsRaw;
-}
-
-const refresh = () => {
-  isFirstTimeNormalTrans = true;
-  isFirstTimeScTrans = true;
-  balance = 0;
-  totalGasUsed = 0;
-  fees = 0;
-}
-
-const trimAddress = (address) => {
-  return address.slice(0, 5) + "..." + address.slice(address.length - 4);
-}
+  return someTransactionsRaw;
+};
 
 const arrayToCsv = (array) => {
-  const csvHeader = "TxHash,Timestamp,Value,Sender,Receiver,Data,Status,Type,Gas,Fee\n";
-  const csvContent = array.map(
-    (row) =>
-      [row.txHash, row.timestamp, row.value, row.sender, row.receiver, "row.data", row.status, row.type, row.gas, row.fee].join(
-        ","
-      )
-  ).join("\n");
+  const csvHeader =
+    "Timestamp,Value,Type,Address,Status,TxType,Fee,TxHash,Data\n";
+  const csvContent = array
+    .map((row) =>
+      [
+        row.timestamp,
+        row.value,
+        row.action,
+        row.address,
+        row.status,
+        row.transactionType,
+        row.fee,
+        row.txHash,
+        row.data,
+      ].join(",")
+    )
+    .join("\n");
 
   const csvData = csvHeader + csvContent;
 
   return csvData;
-}
+};
 
-const formatValue = (value) => {
-  //   return new BigInt(value)
-  //     .dividedBy(new BigNumber(10 ** networkConfig.data.config.erd_denomination))
-  // //     .toFixed(7);
-  // console.log(BigInt(value));
-  // let a = BigInt(10 ** 18);
-  // console.log({ a });
+const getAction = (sender, receiver) => {
+  if (sender === receiver) {
+    return actionTypes.SELF;
+  } else if (receiver === address) {
+    return actionTypes.RECEIVED;
+  } else if (sender === address) {
+    return actionTypes.SEND;
+  }
+};
 
+const getAddress = (sender, receiver) => {
+  if (sender === address) {
+    return receiver;
+  } else if (receiver === address) {
+    return sender;
+  }
+};
 
+const deleteFrontZeroes = (string) => {
+  for (let index = 0; index < string.length; index++) {
+    if (string[index] === "0" && string[index + 1] !== ".") {
+      string = string.slice(1, string.length);
+      index--;
+    } else {
+      return string;
+    }
+  }
+};
 
-  const formattedValue = value / (10 ** 18);
+const deleteBackZeroes = (string) => {
+  for (let index = string.length - 1; index >= 0; index--) {
+    if (string[index] === "0" && string[index - 1] !== ".") {
+      string = string.slice(0, index);
+    } else {
+      return string;
+    }
+  }
+};
 
-  return formattedValue;
-}
+const denominateValue = (value) => {
+  let zeroes = "000000000000000000";
+
+  let isValueNegative = value < 0;
+  if (isValueNegative) {
+    value = -value;
+  }
+
+  let stringValue = String(value);
+
+  let zeroesBeforeStringValue = zeroes + stringValue;
+
+  const lenght = zeroesBeforeStringValue.length;
+
+  let denominatedValue =
+    zeroesBeforeStringValue.slice(0, lenght - 18) +
+    "." +
+    zeroesBeforeStringValue.slice(length - 18);
+
+  denominatedValue = deleteFrontZeroes(denominatedValue);
+  denominatedValue = deleteBackZeroes(denominatedValue);
+
+  if (isValueNegative) denominatedValue = "-" + denominatedValue;
+
+  return denominatedValue;
+};
+
+const getFee = (txType, row) => {
+  if (txType === transactionTypes.TRANSACTION && row.sender === address) {
+    return denominateValue(parseInt(row.fee));
+  }
+
+  return BigInt(0);
+};
+
+const formatTransactions = (rawTransactions, txType) => {
+  const formattedTransactions = rawTransactions.map((row) => ({
+    timestamp: formatToDate(row._source.timestamp),
+    value: getValue(
+      row._source.sender,
+      row._source.receiver,
+      row._source.value
+    ),
+    action: getAction(row._source.sender, row._source.receiver),
+    address: getAddress(row._source.sender, row._source.receiver),
+    status: getStatus(txType, row._source),
+    transactionType: txType,
+    fee: getFee(txType, row._source),
+    txHash: row._id,
+    data: getData(row._source.data),
+  }));
+
+  return formattedTransactions;
+};
+
+const getData = (data) => {
+  return data ? Buffer.from(data, "base64").toString("binary") : "";
+};
+
+const getStatus = (transactionType, row) => {
+  return transactionType === transactionTypes.TRANSACTION
+    ? row.status
+    : status.SUCCESS;
+};
 
 const getValue = (sender, receiver, value) => {
   if (sender === receiver) {
-    return 0;
+    return BigInt(0);
   }
-
-  // if (address === sender && isSmartContract(receiver)) {
-  //   return value / (10 ** 18);
-  // }
-
-  // if (isSmartContract(sender) && (receiver === address)) {
-  //   return (-value) / (10 ** 18);
-  // }
 
   if (sender === address) {
     value = -value;
-    //    return (-value) / (10 ** 18);
   }
 
-  // if (receiver === address) {
-  // //  return value / (10 ** 18);
-  // }
-
-  const formattedValue = value / (10 ** 18);
-
-  return formattedValue;
-}
+  return denominateValue(BigInt(value));
+};
 
 const formatToDate = (timestamp) => {
   const date = new Date(timestamp * 1000);
+  const formattedDate =
+    date.toISOString().slice(0, 10) + " " + date.toTimeString().slice(0, 8);
 
-  return (
-    date.toISOString().slice(0, 10) + " " + date.toTimeString().slice(0, 8)
-  );
-}
+  return formattedDate;
+};
 
-const formatScTransactions = (resultScTransactionsRaw) => {
-  const someScTransactions = resultScTransactionsRaw
-    .filter((x) => (showZeroValues ? x : x._source.value !== "0"))
-    .map((row) => ({
-      txHash: row._id,
-      sender: row._source.sender,
-      receiver: row._source.receiver,
-      senderTrimmed: trimAddress(row._source.sender),
-      receiverTrimmed: trimAddress(row._source.receiver),
-      value: row._source.receiver === address ? row._source.value / (10 ** 18) : 0,//getValue(row._source.sender, row._source.receiver, row._source.value),
-      timestamp: formatToDate(row._source.timestamp),
-      status: "success",
-      type: "scResult",
-      gas: 0,
-      fee: 0
-    }));
-
-  return someScTransactions;
-}
-
-const formatSimpleTransactions = (someResultTransactionsRaw) => {
-  const transactions = someResultTransactionsRaw
-    .filter((row) => (showZeroValues ? row : row._source.value !== "0"))
-    .map((row) => ({
-      txHash: row._id,
-      sender: row._source.sender,
-      receiver: row._source.receiver,
-      senderTrimmed: trimAddress(row._source.sender),
-      receiverTrimmed: trimAddress(row._source.receiver),
-      data: row._source.data ? Buffer.from(row._source.data, "base64").toString("binary") : "",
-      value: getValue(row._source.sender, row._source.receiver, row._source.value),
-      timestamp: formatToDate(row._source.timestamp),
-      status: row._source.status,
-      type: "Transaction",
-      gas: row._source.sender === address ? (row._source.gasUsed * row._source.gasPrice) / (10 ** 18) : 0,  //getValue(address, '', row._source.sender === address ? row._source.fee : '0')
-      fee: row._source.sender === address ? parseInt(row._source.fee) / (10 ** 18) : 0
-    }));
-
-  return transactions;
-}
-
-const getBody = (address) => {
+const getTransactionBody = (address) => {
   const body = {
-    size: size,
+    size: MAXIMUM_NUMBER_OF_ROWS,
     query: {
       bool: {
         should: [
@@ -376,7 +377,36 @@ const getBody = (address) => {
     },
   };
   return body;
-}
+};
+
+const getSCBody = (address) => {
+  const body = {
+    size: MAXIMUM_NUMBER_OF_ROWS,
+    query: {
+      bool: {
+        must: [
+          {
+            match: {
+              receiver: {
+                query: `${address}`,
+              },
+            },
+          },
+        ],
+        must_not: [
+          {
+            match: {
+              sender: {
+                query: `${address}`,
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+  return body;
+};
 
 const getScrollBody = (scrollId) => {
   const scrollBody = {
@@ -385,14 +415,16 @@ const getScrollBody = (scrollId) => {
   };
 
   return scrollBody;
-}
+};
 
 const sortTransactionsByTimestamp = (transactions) => {
-  return transactions.sort((element1, element2) => { return element2.timestamp.localeCompare(element1.timestamp) });
-}
+  return transactions.sort((element1, element2) => {
+    return element2.timestamp.localeCompare(element1.timestamp);
+  });
+};
 
 const downloadStatement = () => {
-  var blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+  var blob = new Blob([csvData], { type: "text/csv;charset=utf-8;" });
   var url = URL.createObjectURL(blob);
   var link = document.createElement("a");
   link.setAttribute("href", url);
@@ -400,12 +432,8 @@ const downloadStatement = () => {
   document.body.appendChild(link);
 
   link.click();
-}
-
-const changeShowZeroValues = () => {
-  showZeroValues = filterValue.checked;
-}
+};
 
 const setCsvData = (transactionsArray) => {
   csvData = arrayToCsv(transactionsArray);
-}
+};

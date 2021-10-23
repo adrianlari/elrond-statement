@@ -1,40 +1,50 @@
 import "regenerator-runtime/runtime";
 import axios from "axios";
-
-const baseUrl = "https://testnet-index.elrond.com";
-
-const url = `${baseUrl}/transactions/_search?scroll=1m`;
-const urlScTransactions = `${baseUrl}/scresults/_search?scroll=1m`;
-
-const noIndexUrl = `${baseUrl}/_search/scroll`;
+import * as constants from "./constants";
 
 var inputAddress = document.getElementById("address");
 var btnGetStatement = document.getElementById("btnGetStatement");
 var divError = document.getElementById("errorMessage");
+var lookupMonths = document.getElementById("months");
 
-let isFirstTime = true;
+let isFirstScroll = true;
 let csvData = "";
 let address;
-const MAXIMUM_NUMBER_OF_ROWS = 10000;
-const ok = "QDZmNm";
+let startTimestamp;
+let endTimestamp;
+let selectedMonth;
+let selectedYear;
+let currentMonthNumber;
 
 btnGetStatement.onclick = async () => getStatement();
+lookupMonths.onchange = async () => setTimestamps();
 
-const transactionTypes = {
-  TRANSACTION: "Transaction",
-  RESULT: "Result",
-};
+const setTimestamps = async () => {
+  startTimestamp = parseInt(lookupMonths.value);
 
-const actionTypes = {
-  SEND: "Sent",
-  RECEIVED: "Received",
-  SELF: "Self",
-};
+  const selectedDate = new Date(startTimestamp);
+  console.log({ selectedDate });
 
-const status = {
-  SUCCESS: "success",
-  FAIL: "fail",
-  INVALID: "invalid",
+  startTimestamp /= 1000;
+
+  selectedMonth = selectedDate.getMonth() + 1;
+  selectedYear = selectedDate.getFullYear();
+
+  if (selectedDate.getMonth() + 1 === currentMonthNumber) {
+    endTimestamp = parseInt(String(new Date().getTime()).slice(0, 10));
+  } else {
+    console.log({ selectedYear });
+    console.log({ selectedMonth });
+    endTimestamp = parseInt(
+      String(new Date(selectedYear, selectedMonth, 1).getTime() - 1).slice(
+        0,
+        10
+      )
+    );
+  }
+
+  console.log({ startTimestamp });
+  console.log({ endTimestamp });
 };
 
 const showSpinner = () => {
@@ -43,6 +53,77 @@ const showSpinner = () => {
 
 const hideSpinner = () => {
   btnGetStatement.innerHTML = `Get Statement`;
+};
+
+const populateMonthsLookup = () => {
+  const today = new Date();
+
+  currentMonthNumber = today.getMonth() + 1;
+  selectedMonth = today.getMonth() + 1;
+  selectedYear = today.getFullYear();
+
+  let options = `<option value="" disabled selected>Select month</option>`;
+
+  for (let index = 0; index < 12; index++) {
+    startTimestamp = new Date(selectedYear, selectedMonth - 1, 1).getTime();
+    console.log({ startTimestamp });
+
+    let monthYearOption = `<option value=${startTimestamp}> ${constants.months[selectedMonth]}  ${selectedYear} </option>`;
+    options += monthYearOption;
+
+    if (selectedMonth === 1) {
+      selectedMonth = 12;
+      selectedYear--;
+    } else selectedMonth--;
+  }
+
+  lookupMonths.innerHTML = options;
+};
+populateMonthsLookup();
+
+const getStatementForSelectedMonth = async () => {
+  const body = getComplexBody(startTimestamp, endTimestamp, address);
+
+  console.log({ body });
+
+  const urlTransactions =
+    "https://devnet-index.elrond.com/transactions/_search";
+
+  const urlSc = "https://devnet-index.elrond.com/scresults/_search";
+
+  const transactions = await axios.post(urlTransactions, body);
+  let scr = await axios.post(urlSc, body);
+
+  console.log({ transactions });
+  console.log({ scr });
+  // if (scr.data.hits.hits) {
+  //   scr = scr.data.hits.hits.filter(
+  //     (x) =>
+  //       x._source && x._source.data && !x._source.data.startsWith(constants.ok)
+  //   );
+  // }
+
+  const allFormattedTransactions = transactions
+    ? formatTransactions(
+        transactions.data.hits.hits,
+        constants.transactionTypes.TRANSACTION
+      )
+    : new Array();
+
+  const allFormattedScresults = scr
+    ? formatTransactions(scr.data.hits.hits, constants.transactionTypes.RESULT)
+    : new Array();
+
+  console.log(allFormattedTransactions);
+  console.log(allFormattedScresults);
+
+  const allTransactionsForSelectedMonth = sortTransactionsByTimestamp(
+    allFormattedScresults.concat(allFormattedTransactions)
+  );
+
+  setCsvData(allTransactionsForSelectedMonth);
+
+  downloadStatement();
 };
 
 const getStatement = async () => {
@@ -56,61 +137,73 @@ const getStatement = async () => {
 
   showSpinner();
 
-  const allTransactionsFormatted = await getAllFormattedTransactions();
-  const allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(
-    allTransactionsFormatted
-  );
+  await getStatementForSelectedMonth();
 
-  setCsvData(allTransactionsSortedByTimestamp);
+  //const allTransactionsFormatted = await getAllFormattedTransactions();
+  //const allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(
+  //allTransactionsFormatted
+  //);
 
-  downloadStatement();
+  //setCsvData(allTransactionsSortedByTimestamp);
+
+  //downloadStatement();
 
   hideSpinner();
 };
 
 const getAllFormattedTransactions = async () => {
   const allSimpleTransactionsRaw = await getAllTransactionsRaw(
-    transactionTypes.TRANSACTION
+    constants.transactionTypes.TRANSACTION
   );
 
   const totalSent = allSimpleTransactionsRaw
-    .filter(
-      (row) =>
-        row._source.sender === address &&
-        row._source.receiver !== address &&
-        row._source.status === "success"
-    )
-    .map((row) => BigInt(String(row._source.value)))
-    .reduce((a, b) => a + b, BigInt(0));
+    ? allSimpleTransactionsRaw
+        .filter(
+          (row) =>
+            row._source.sender === address &&
+            row._source.receiver !== address &&
+            row._source.status === constants.status.SUCCESS
+        )
+        .map((row) => BigInt(String(row._source.value)))
+        .reduce((a, b) => a + b, BigInt(0))
+    : BigInt(0);
 
   const totalReceived = allSimpleTransactionsRaw
-    .filter(
-      (row) =>
-        row._source.sender !== address &&
-        row._source.receiver === address &&
-        row._source.status === "success"
-    )
-    .map((row) => BigInt(String(row._source.value)))
-    .reduce((a, b) => a + b, BigInt(0));
+    ? allSimpleTransactionsRaw
+        .filter(
+          (row) =>
+            row._source.sender !== address &&
+            row._source.receiver === address &&
+            row._source.status === constants.status.SUCCESS
+        )
+        .map((row) => BigInt(String(row._source.value)))
+        .reduce((a, b) => a + b, BigInt(0))
+    : BigInt(0);
 
   const totalFees = allSimpleTransactionsRaw
-    .filter((row) => row._source.sender === address)
-    .map((row) => BigInt(String(row._source.fee)))
-    .reduce((a, b) => a + b, BigInt(0));
+    ? allSimpleTransactionsRaw
+        .filter((row) => row._source.sender === address)
+        .map((row) => BigInt(String(row._source.fee)))
+        .reduce((a, b) => a + b, BigInt(0))
+    : BigInt(0);
 
   const allFormattedSimpleTransactions = allSimpleTransactionsRaw
-    ? formatTransactions(allSimpleTransactionsRaw, transactionTypes.TRANSACTION)
+    ? formatTransactions(
+        allSimpleTransactionsRaw,
+        constants.transactionTypes.TRANSACTION
+      )
     : new Array();
 
   let allScTransactionsRaw = await getAllTransactionsRaw(
-    transactionTypes.RESULT
+    constants.transactionTypes.RESULT
   );
 
   let totalReceivedFromScResult = BigInt(0);
 
   if (allScTransactionsRaw) {
     allScTransactionsRaw = allScTransactionsRaw.filter(
-      (x) => x._source && x._source.data && !x._source.data.startsWith(ok)
+      (x) =>
+        x._source && x._source.data && !x._source.data.startsWith(constants.ok)
     );
 
     totalReceivedFromScResult = allScTransactionsRaw
@@ -133,7 +226,10 @@ const getAllFormattedTransactions = async () => {
   console.log({ statementDetails });
 
   const allFormattedScTransactions = allScTransactionsRaw
-    ? formatTransactions(allScTransactionsRaw, transactionTypes.RESULT)
+    ? formatTransactions(
+        allScTransactionsRaw,
+        constants.transactionTypes.RESULT
+      )
     : new Array();
 
   const allFormattedTransactions = allFormattedSimpleTransactions.concat(
@@ -152,19 +248,19 @@ const hasAnyTransactions = (array) => {
 };
 
 const isArrayFull = (array) => {
-  return array.data.hits.hits.length === MAXIMUM_NUMBER_OF_ROWS;
+  return array.data.hits.hits.length === constants.MAXIMUM_NUMBER_OF_ROWS;
 };
 
 const getAllTransactionsRaw = async (txType) => {
   let body;
 
-  if (txType === transactionTypes.TRANSACTION) {
+  if (txType === constants.transactionTypes.TRANSACTION) {
     body = getTransactionBody(address);
-  } else if (txType === transactionTypes.RESULT) {
+  } else if (txType === constants.transactionTypes.RESULT) {
     body = getSCBody(address);
   }
 
-  isFirstTime = true;
+  isFirstScroll = true;
   let someTransactionsRaw = await getTransactions(body, txType);
 
   if (!hasAnyTransactions(someTransactionsRaw)) {
@@ -191,14 +287,16 @@ const getAllTransactionsRaw = async (txType) => {
 const getTransactions = async (neededBody, txType) => {
   let someTransactionsRaw;
 
-  if (isFirstTime) {
+  if (isFirstScroll) {
     someTransactionsRaw = await axios.post(
-      txType === transactionTypes.RESULT ? urlScTransactions : url,
+      txType === constants.transactionTypes.RESULT
+        ? constants.urlScTransactions
+        : constants.url,
       neededBody
     );
-    isFirstTime = false;
+    isFirstScroll = false;
   } else {
-    someTransactionsRaw = await axios.post(noIndexUrl, neededBody);
+    someTransactionsRaw = await axios.post(constants.noIndexUrl, neededBody);
   }
 
   return someTransactionsRaw;
@@ -230,11 +328,11 @@ const arrayToCsv = (array) => {
 
 const getAction = (sender, receiver) => {
   if (sender === receiver) {
-    return actionTypes.SELF;
+    return constants.actionTypes.SELF;
   } else if (receiver === address) {
-    return actionTypes.RECEIVED;
+    return constants.actionTypes.RECEIVED;
   } else if (sender === address) {
-    return actionTypes.SEND;
+    return constants.actionTypes.SEND;
   }
 };
 
@@ -295,7 +393,10 @@ const denominateValue = (value) => {
 };
 
 const getFee = (txType, row) => {
-  if (txType === transactionTypes.TRANSACTION && row.sender === address) {
+  if (
+    txType === constants.transactionTypes.TRANSACTION &&
+    row.sender === address
+  ) {
     return denominateValue(parseInt(row.fee));
   }
 
@@ -327,9 +428,9 @@ const getData = (data) => {
 };
 
 const getStatus = (transactionType, row) => {
-  return transactionType === transactionTypes.TRANSACTION
+  return transactionType === constants.transactionTypes.TRANSACTION
     ? row.status
-    : status.SUCCESS;
+    : constants.status.SUCCESS;
 };
 
 const getValue = (sender, receiver, value) => {
@@ -352,9 +453,40 @@ const formatToDate = (timestamp) => {
   return formattedDate;
 };
 
+const getComplexBody = (startTimestamp, endTimestamp, address) => {
+  const body = {
+    sort: {
+      timestamp: {
+        order: "asc",
+      },
+    },
+    query: {
+      bool: {
+        filter: [
+          {
+            range: {
+              timestamp: {
+                gte: startTimestamp,
+                lte: endTimestamp,
+              },
+            },
+          },
+          {
+            query_string: {
+              query: `sender: ${address} OR  receiver: ${address}`,
+            },
+          },
+        ],
+      },
+    },
+  };
+
+  return body;
+};
+
 const getTransactionBody = (address) => {
   const body = {
-    size: MAXIMUM_NUMBER_OF_ROWS,
+    size: constants.MAXIMUM_NUMBER_OF_ROWS,
     query: {
       bool: {
         should: [
@@ -376,12 +508,13 @@ const getTransactionBody = (address) => {
       },
     },
   };
+
   return body;
 };
 
 const getSCBody = (address) => {
   const body = {
-    size: MAXIMUM_NUMBER_OF_ROWS,
+    size: constants.MAXIMUM_NUMBER_OF_ROWS,
     query: {
       bool: {
         must: [

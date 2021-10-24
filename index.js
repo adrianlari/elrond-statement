@@ -16,6 +16,9 @@ let selectedMonth;
 let selectedYear;
 let currentMonthNumber;
 
+const urlTransactions = `${constants.baseUrl}/transactions/_search`;
+const urlSc = `${constants.baseUrl}/scresults/_search`;
+
 btnGetStatement.onclick = async () => getStatement();
 lookupMonths.onchange = async () => setTimestamps();
 
@@ -23,7 +26,7 @@ const setTimestamps = async () => {
   startTimestamp = parseInt(lookupMonths.value);
 
   const selectedDate = new Date(startTimestamp);
-  console.log({ selectedDate });
+  //console.log({ selectedDate });
 
   startTimestamp /= 1000;
 
@@ -33,8 +36,8 @@ const setTimestamps = async () => {
   if (selectedDate.getMonth() + 1 === currentMonthNumber) {
     endTimestamp = parseInt(String(new Date().getTime()).slice(0, 10));
   } else {
-    console.log({ selectedYear });
-    console.log({ selectedMonth });
+    //console.log({ selectedYear });
+    //console.log({ selectedMonth });
     endTimestamp = parseInt(
       String(new Date(selectedYear, selectedMonth, 1).getTime() - 1).slice(
         0,
@@ -43,8 +46,8 @@ const setTimestamps = async () => {
     );
   }
 
-  console.log({ startTimestamp });
-  console.log({ endTimestamp });
+  //console.log({ startTimestamp });
+  //console.log({ endTimestamp });
 };
 
 const showSpinner = () => {
@@ -66,7 +69,7 @@ const populateMonthsLookup = () => {
 
   for (let index = 0; index < 12; index++) {
     startTimestamp = new Date(selectedYear, selectedMonth - 1, 1).getTime();
-    console.log({ startTimestamp });
+    //console.log({ startTimestamp });
 
     let monthYearOption = `<option value=${startTimestamp}> ${constants.months[selectedMonth]}  ${selectedYear} </option>`;
     options += monthYearOption;
@@ -81,50 +84,82 @@ const populateMonthsLookup = () => {
 };
 populateMonthsLookup();
 
-const getStatementForSelectedMonth = async () => {
-  const body = getComplexBody(startTimestamp, endTimestamp, address);
+const getAllRecordsSelectedMonth = async (body, txType) => {
+  let records =
+    txType === constants.transactionTypes.TRANSACTION
+      ? await axios.post(urlTransactions, body)
+      : await axios.post(urlSc, body);
 
-  console.log({ body });
+  let allRecords = new Array();
 
-  const urlTransactions =
-    "https://devnet-index.elrond.com/transactions/_search";
+  appendContentToArray(allRecords, records);
 
-  const urlSc = "https://devnet-index.elrond.com/scresults/_search";
+  while (
+    records &&
+    records.data &&
+    records.data.hits.hits.lenght === constants.MAXIMUM_NUMBER_OF_ROWS
+  ) {
+    let lastTimestamp = records[records.data.data.hits.length - 1].timestamp;
 
-  const transactions = await axios.post(urlTransactions, body);
-  let scr = await axios.post(urlSc, body);
+    body = getComplexBody(lastTimestamp, endTimestamp, address);
 
-  console.log({ transactions });
-  console.log({ scr });
-  // if (scr.data.hits.hits) {
-  //   scr = scr.data.hits.hits.filter(
-  //     (x) =>
-  //       x._source && x._source.data && !x._source.data.startsWith(constants.ok)
-  //   );
-  // }
+    records =
+      txType === constants.transactionTypes.TRANSACTION
+        ? await axios.post(urlTransactions, body)
+        : await axios.post(urlSc, body);
 
-  const allFormattedTransactions = transactions
-    ? formatTransactions(
-        transactions.data.hits.hits,
-        constants.transactionTypes.TRANSACTION
-      )
-    : new Array();
+    appendContentToArray(allRecords, records);
+  }
 
-  const allFormattedScresults = scr
-    ? formatTransactions(scr.data.hits.hits, constants.transactionTypes.RESULT)
-    : new Array();
+  allRecords = getUniqueRecords(allRecords);
 
-  console.log(allFormattedTransactions);
-  console.log(allFormattedScresults);
+  console.log({ allRecords });
 
-  const allTransactionsForSelectedMonth = sortTransactionsByTimestamp(
-    allFormattedScresults.concat(allFormattedTransactions)
+  return allRecords;
+};
+
+const getAllTransactionsForSelectedMonth = async () => {
+  let body = getComplexBody(startTimestamp, endTimestamp, address);
+
+  const allTransactionsRaw = await getAllRecordsSelectedMonth(
+    body,
+    constants.transactionTypes.TRANSACTION
   );
 
-  setCsvData(allTransactionsForSelectedMonth);
+  const allScResultsRaw = await getAllRecordsSelectedMonth(
+    body,
+    constants.transactionTypes.RESULT
+  );
+
+  const allTransactionsFormatted = formatTransactions(
+    allTransactionsRaw,
+    constants.transactionTypes.TRANSACTION
+  );
+  const allScResultsFormatted = formatTransactions(
+    allScResultsRaw,
+    constants.transactionTypes.RESULT
+  ).filter(
+    (x) =>
+      x._source && x._source.data && !x._source.data.startsWith(constants.ok)
+  );
+
+  return allTransactionsFormatted.concat(allScResultsFormatted);
+};
+
+const getStatementForSelectedMonth = async () => {
+  const allTransactionsSelectedMonth =
+    await getAllTransactionsForSelectedMonth();
+
+  const allTransactionsSelectedMonthSorted = sortTransactionsByTimestamp(
+    allTransactionsSelectedMonth
+  );
+
+  setCsvData(allTransactionsSelectedMonthSorted);
 
   downloadStatement();
 };
+
+const getUniqueRecords = (array) => [...new Set(array)];
 
 const getStatement = async () => {
   address = inputAddress.value;
@@ -151,96 +186,10 @@ const getStatement = async () => {
   hideSpinner();
 };
 
-const getAllFormattedTransactions = async () => {
-  const allSimpleTransactionsRaw = await getAllTransactionsRaw(
-    constants.transactionTypes.TRANSACTION
-  );
-
-  const totalSent = allSimpleTransactionsRaw
-    ? allSimpleTransactionsRaw
-        .filter(
-          (row) =>
-            row._source.sender === address &&
-            row._source.receiver !== address &&
-            row._source.status === constants.status.SUCCESS
-        )
-        .map((row) => BigInt(String(row._source.value)))
-        .reduce((a, b) => a + b, BigInt(0))
-    : BigInt(0);
-
-  const totalReceived = allSimpleTransactionsRaw
-    ? allSimpleTransactionsRaw
-        .filter(
-          (row) =>
-            row._source.sender !== address &&
-            row._source.receiver === address &&
-            row._source.status === constants.status.SUCCESS
-        )
-        .map((row) => BigInt(String(row._source.value)))
-        .reduce((a, b) => a + b, BigInt(0))
-    : BigInt(0);
-
-  const totalFees = allSimpleTransactionsRaw
-    ? allSimpleTransactionsRaw
-        .filter((row) => row._source.sender === address)
-        .map((row) => BigInt(String(row._source.fee)))
-        .reduce((a, b) => a + b, BigInt(0))
-    : BigInt(0);
-
-  const allFormattedSimpleTransactions = allSimpleTransactionsRaw
-    ? formatTransactions(
-        allSimpleTransactionsRaw,
-        constants.transactionTypes.TRANSACTION
-      )
-    : new Array();
-
-  let allScTransactionsRaw = await getAllTransactionsRaw(
-    constants.transactionTypes.RESULT
-  );
-
-  let totalReceivedFromScResult = BigInt(0);
-
-  if (allScTransactionsRaw) {
-    allScTransactionsRaw = allScTransactionsRaw.filter(
-      (x) =>
-        x._source && x._source.data && !x._source.data.startsWith(constants.ok)
-    );
-
-    totalReceivedFromScResult = allScTransactionsRaw
-      .map((x) => BigInt(String(x._source.value)))
-      .reduce((a, b) => a + b, BigInt(0));
-  }
-
-  const balance =
-    totalReceived - totalSent - totalFees + totalReceivedFromScResult;
-
-  const statementDetails = {
-    totalReceived: totalReceived,
-    totalSent: totalSent,
-    totalFees: totalFees,
-    totalReceivedFromScResult: totalReceivedFromScResult,
-    balance: balance,
-    address: address,
-  };
-
-  console.log({ statementDetails });
-
-  const allFormattedScTransactions = allScTransactionsRaw
-    ? formatTransactions(
-        allScTransactionsRaw,
-        constants.transactionTypes.RESULT
-      )
-    : new Array();
-
-  const allFormattedTransactions = allFormattedSimpleTransactions.concat(
-    allFormattedScTransactions
-  );
-
-  return allFormattedTransactions;
-};
-
 const appendContentToArray = (array, content) => {
-  content.data.hits.hits.map((row) => array.push(row));
+  if (content && content.data && content.data.hits.hits) {
+    content.data.hits.hits.map((row) => array.push(row));
+  }
 };
 
 const hasAnyTransactions = (array) => {
@@ -249,57 +198,6 @@ const hasAnyTransactions = (array) => {
 
 const isArrayFull = (array) => {
   return array.data.hits.hits.length === constants.MAXIMUM_NUMBER_OF_ROWS;
-};
-
-const getAllTransactionsRaw = async (txType) => {
-  let body;
-
-  if (txType === constants.transactionTypes.TRANSACTION) {
-    body = getTransactionBody(address);
-  } else if (txType === constants.transactionTypes.RESULT) {
-    body = getSCBody(address);
-  }
-
-  isFirstScroll = true;
-  let someTransactionsRaw = await getTransactions(body, txType);
-
-  if (!hasAnyTransactions(someTransactionsRaw)) {
-    return;
-  }
-
-  let allTransactionsRaw = new Array();
-  appendContentToArray(allTransactionsRaw, someTransactionsRaw);
-
-  const scrollId = someTransactionsRaw.data._scroll_id;
-  let scrollBody = getScrollBody(scrollId);
-
-  while (isArrayFull(someTransactionsRaw)) {
-    someTransactionsRaw = await getTransactions(scrollBody);
-
-    if (hasAnyTransactions(someTransactionsRaw)) {
-      appendContentToArray(allTransactionsRaw, someTransactionsRaw);
-    }
-  }
-
-  return allTransactionsRaw;
-};
-
-const getTransactions = async (neededBody, txType) => {
-  let someTransactionsRaw;
-
-  if (isFirstScroll) {
-    someTransactionsRaw = await axios.post(
-      txType === constants.transactionTypes.RESULT
-        ? constants.urlScTransactions
-        : constants.url,
-      neededBody
-    );
-    isFirstScroll = false;
-  } else {
-    someTransactionsRaw = await axios.post(constants.noIndexUrl, neededBody);
-  }
-
-  return someTransactionsRaw;
 };
 
 const arrayToCsv = (array) => {
@@ -482,72 +380,6 @@ const getComplexBody = (startTimestamp, endTimestamp, address) => {
   };
 
   return body;
-};
-
-const getTransactionBody = (address) => {
-  const body = {
-    size: constants.MAXIMUM_NUMBER_OF_ROWS,
-    query: {
-      bool: {
-        should: [
-          {
-            match: {
-              sender: {
-                query: `${address}`,
-              },
-            },
-          },
-          {
-            match: {
-              receiver: {
-                query: `${address}`,
-              },
-            },
-          },
-        ],
-      },
-    },
-  };
-
-  return body;
-};
-
-const getSCBody = (address) => {
-  const body = {
-    size: constants.MAXIMUM_NUMBER_OF_ROWS,
-    query: {
-      bool: {
-        must: [
-          {
-            match: {
-              receiver: {
-                query: `${address}`,
-              },
-            },
-          },
-        ],
-        must_not: [
-          {
-            match: {
-              sender: {
-                query: `${address}`,
-              },
-            },
-          },
-        ],
-      },
-    },
-  };
-  return body;
-};
-
-const getScrollBody = (scrollId) => {
-  const scrollBody = {
-    scroll: "1m",
-    scroll_id: `${scrollId}`,
-  };
-
-  return scrollBody;
 };
 
 const sortTransactionsByTimestamp = (transactions) => {

@@ -90,6 +90,8 @@ const getAllRecordsSelectedMonth = async (body, txType) => {
       ? await axios.post(urlTransactions, body)
       : await axios.post(urlSc, body);
 
+  console.log(records);
+
   let allRecords = new Array();
 
   appendContentToArray(allRecords, records);
@@ -97,16 +99,21 @@ const getAllRecordsSelectedMonth = async (body, txType) => {
   while (
     records &&
     records.data &&
-    records.data.hits.hits.lenght === constants.MAXIMUM_NUMBER_OF_ROWS
+    records.data.hits.hits.length === constants.MAXIMUM_NUMBER_OF_ROWS
   ) {
-    let lastTimestamp = records[records.data.data.hits.length - 1].timestamp;
+    let lastTimestamp =
+      records.data.hits.hits[records.data.hits.hits.length - 1]._source
+        .timestamp;
 
+    console.log(lastTimestamp);
     body = getComplexBody(lastTimestamp, endTimestamp, address);
 
     records =
       txType === constants.transactionTypes.TRANSACTION
         ? await axios.post(urlTransactions, body)
         : await axios.post(urlSc, body);
+
+    console.log(records);
 
     appendContentToArray(allRecords, records);
   }
@@ -156,7 +163,7 @@ const getStatementForSelectedMonth = async () => {
 
   setCsvData(allTransactionsSelectedMonthSorted);
 
-  downloadStatement();
+  //    downloadStatement();
 };
 
 const getUniqueRecords = (array) => [...new Set(array)];
@@ -353,6 +360,7 @@ const formatToDate = (timestamp) => {
 
 const getComplexBody = (startTimestamp, endTimestamp, address) => {
   const body = {
+    size: constants.MAXIMUM_NUMBER_OF_ROWS,
     sort: {
       timestamp: {
         order: "asc",
@@ -396,7 +404,7 @@ const downloadStatement = () => {
   link.setAttribute("download", "Statement.csv");
   document.body.appendChild(link);
 
-  link.click();
+  //link.click();
 };
 
 const setCsvData = (transactionsArray) => {

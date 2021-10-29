@@ -24,6 +24,8 @@ lookupMonths.onchange = async () => setTimestamps();
 btnGetStatement.onclick = async () => getStatement();
 
 const setTimestamps = async () => {
+  errorMsg.classList.remove("d-block");
+
   startTimestamp = parseInt(lookupMonths.value);
 
   const initialTimestampOfSelectedMonth = new Date(startTimestamp * 1000);
@@ -187,22 +189,40 @@ const getStatementForSelectedMonth = async () => {
 
 const getUniqueRecords = (array) => [...new Set(array)];
 
+const allFieldsValid = () => {
+  let areAllFieldsValid = true;
+
+  if (
+    !address ||
+    !address.startsWith("erd1") ||
+    address.length !== constants.ADDRESS_LENGTH
+  ) {
+    inputAddress.classList.add("is-invalid");
+    divError.textContent = "Enter a valid address.";
+    areAllFieldsValid = false;
+  } else {
+    inputAddress.classList.remove("is-invalid");
+  }
+
+  if (!lookupMonths.value) {
+    errorMsg.classList.add("d-block");
+    errorMsg.textContent = "Please select a month.";
+    areAllFieldsValid = false;
+  }
+
+  return areAllFieldsValid;
+};
+
 const getStatement = async () => {
   if (!inputAddress) {
     return;
   }
 
+  console.log("click");
+
   address = inputAddress.value;
 
-  if (!address || !address.startsWith("erd1")) {
-    inputAddress.classList.toggle("is-invalid");
-    divError.textContent = "Enter a valid address.";
-    return;
-  }
-
-  if (!lookupMonths.value) {
-    errorMsg.classList.toggle("d-block");
-    errorMsg.textContent = "Please select a month.";
+  if (!allFieldsValid()) {
     return;
   }
 

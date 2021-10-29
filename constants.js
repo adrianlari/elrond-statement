@@ -29,3 +29,4 @@ export const noIndexUrl = `${baseUrl}/_search/scroll`;
 export const MAXIMUM_NUMBER_OF_ROWS = 10000;
 export const ok = "QDZmNm";
 export const NUMBER_OF_MONTHS = 12;
+export const ADDRESS_LENGTH = 62;

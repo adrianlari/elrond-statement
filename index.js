@@ -7,47 +7,38 @@ var btnGetStatement = document.getElementById("btnGetStatement");
 var divError = document.getElementById("errorMessage");
 var lookupMonths = document.getElementById("months");
 
-let isFirstScroll = true;
 let csvData = "";
 let address;
 let startTimestamp;
 let endTimestamp;
-let selectedMonth;
+let selectedMonthNumber;
 let selectedYear;
 let currentMonthNumber;
+let today;
 
 const urlTransactions = `${constants.baseUrl}/transactions/_search`;
 const urlSc = `${constants.baseUrl}/scresults/_search`;
 
-btnGetStatement.onclick = async () => getStatement();
 lookupMonths.onchange = async () => setTimestamps();
+btnGetStatement.onclick = async () => getStatement();
 
 const setTimestamps = async () => {
-  startTimestamp = parseInt(lookupMonths.value);
+  startTimestamp = lookupMonths.value;
 
-  const selectedDate = new Date(startTimestamp);
-  //console.log({ selectedDate });
+  const initialTimestampOfSelectedMonth = new Date(startTimestamp * 1000);
 
-  startTimestamp /= 1000;
+  currentMonthNumber = getMonthNumberOf(today);
 
-  selectedMonth = selectedDate.getMonth() + 1;
-  selectedYear = selectedDate.getFullYear();
+  selectedMonthNumber = getMonthNumberOf(initialTimestampOfSelectedMonth);
+  selectedYear = getYearOf(initialTimestampOfSelectedMonth);
 
-  if (selectedDate.getMonth() + 1 === currentMonthNumber) {
-    endTimestamp = parseInt(String(new Date().getTime()).slice(0, 10));
+  if (selectedMonthNumber === currentMonthNumber) {
+    endTimestamp = Math.floor(new Date().getTime() / 1000);
   } else {
-    //console.log({ selectedYear });
-    //console.log({ selectedMonth });
-    endTimestamp = parseInt(
-      String(new Date(selectedYear, selectedMonth, 1).getTime() - 1).slice(
-        0,
-        10
-      )
+    endTimestamp = Math.floor(
+      (new Date(selectedYear, selectedMonthNumber + 1, 1).getTime() - 1) / 1000
     );
   }
-
-  //console.log({ startTimestamp });
-  //console.log({ endTimestamp });
 };
 
 const showSpinner = () => {
@@ -58,29 +49,61 @@ const hideSpinner = () => {
   btnGetStatement.innerHTML = `Get Statement`;
 };
 
-const populateMonthsLookup = () => {
-  const today = new Date();
+const getInitialTimestampForMonth = (selectedYear, selectedMonth) => {
+  return Math.floor(new Date(selectedYear, selectedMonth, 1).getTime() / 1000);
+};
 
-  currentMonthNumber = today.getMonth() + 1;
-  selectedMonth = today.getMonth() + 1;
-  selectedYear = today.getFullYear();
+const getMonthNumberOf = (day) => {
+  return day.getMonth();
+};
 
-  let options = `<option value="" disabled selected>Select month</option>`;
+const getYearOf = (day) => {
+  return day.getFullYear();
+};
 
-  for (let index = 0; index < 12; index++) {
-    startTimestamp = new Date(selectedYear, selectedMonth - 1, 1).getTime();
-    //console.log({ startTimestamp });
+const createOption = (selectedYear, selectedMonth) => {
+  const initialTimestamp = getInitialTimestampForMonth(
+    selectedYear,
+    selectedMonth
+  );
 
-    let monthYearOption = `<option value=${startTimestamp}> ${constants.months[selectedMonth]}  ${selectedYear} </option>`;
-    options += monthYearOption;
+  const option = `<option value=${initialTimestamp} > ${constants.months[selectedMonth]}  ${selectedYear} </option>`;
 
-    if (selectedMonth === 1) {
-      selectedMonth = 12;
-      selectedYear--;
-    } else selectedMonth--;
+  return option;
+};
+
+const getPreviousYear = (year) => {
+  return --year;
+};
+
+const getPreviousMonth = (month) => {
+  return --month;
+};
+
+const createOptionsForOneYearBack = (today) => {
+  selectedMonthNumber = getMonthNumberOf(today);
+  selectedYear = getYearOf(today);
+
+  let options = `<option class="form-control" value="" disabled selected>Select month</option>`;
+
+  for (let index = 0; index < constants.NUMBER_OF_MONTHS; index++) {
+    options += createOption(selectedYear, selectedMonthNumber);
+
+    if (selectedMonthNumber === constants.months.indexOf("January")) {
+      selectedMonthNumber = constants.months.indexOf("December");
+      selectedYear = getPreviousYear(selectedYear);
+    } else {
+      selectedMonthNumber = getPreviousMonth(selectedMonthNumber);
+    }
   }
 
   lookupMonths.innerHTML = options;
+};
+
+const populateMonthsLookup = () => {
+  today = new Date();
+
+  createOptionsForOneYearBack(today);
 };
 populateMonthsLookup();
 
@@ -90,22 +113,15 @@ const getAllRecordsSelectedMonth = async (body, txType) => {
       ? await axios.post(urlTransactions, body)
       : await axios.post(urlSc, body);
 
-  console.log(records);
-
   let allRecords = new Array();
 
   appendContentToArray(allRecords, records);
 
-  while (
-    records &&
-    records.data &&
-    records.data.hits.hits.length === constants.MAXIMUM_NUMBER_OF_ROWS
-  ) {
+  while (records && records.data && isArrayFull(records)) {
     let lastTimestamp =
       records.data.hits.hits[records.data.hits.hits.length - 1]._source
         .timestamp;
 
-    console.log(lastTimestamp);
     body = getComplexBody(lastTimestamp, endTimestamp, address);
 
     records =
@@ -113,20 +129,16 @@ const getAllRecordsSelectedMonth = async (body, txType) => {
         ? await axios.post(urlTransactions, body)
         : await axios.post(urlSc, body);
 
-    console.log(records);
-
     appendContentToArray(allRecords, records);
   }
 
   allRecords = getUniqueRecords(allRecords);
 
-  console.log({ allRecords });
-
   return allRecords;
 };
 
 const getAllTransactionsForSelectedMonth = async () => {
-  let body = getComplexBody(startTimestamp, endTimestamp, address);
+  const body = getComplexBody(startTimestamp, endTimestamp, address);
 
   const allTransactionsRaw = await getAllRecordsSelectedMonth(
     body,
@@ -142,6 +154,7 @@ const getAllTransactionsForSelectedMonth = async () => {
     allTransactionsRaw,
     constants.transactionTypes.TRANSACTION
   );
+
   const allScResultsFormatted = formatTransactions(
     allScResultsRaw,
     constants.transactionTypes.RESULT
@@ -157,38 +170,42 @@ const getStatementForSelectedMonth = async () => {
   const allTransactionsSelectedMonth =
     await getAllTransactionsForSelectedMonth();
 
-  const allTransactionsSelectedMonthSorted = sortTransactionsByTimestamp(
+  if (!allTransactionsSelectedMonth || !allTransactionsSelectedMonth.lenght) {
+    return;
+  }
+
+  const allSortedTransactionsSelectedMonth = sortTransactionsByTimestamp(
     allTransactionsSelectedMonth
   );
 
-  setCsvData(allTransactionsSelectedMonthSorted);
+  setCsvData(allSortedTransactionsSelectedMonth);
 
-  //    downloadStatement();
+  downloadStatement();
 };
 
 const getUniqueRecords = (array) => [...new Set(array)];
 
 const getStatement = async () => {
+  if (!inputAddress) {
+    return;
+  }
+
   address = inputAddress.value;
 
   if (!address || !address.startsWith("erd1")) {
     inputAddress.classList.toggle("is-invalid");
-    divError.textContent = "Enter a valid address";
+    divError.textContent = "Enter a valid address.";
+    return;
+  }
+
+  if (!lookupMonths.value) {
+    divError.textContent = "Please select a month.";
     return;
   }
 
   showSpinner();
 
   await getStatementForSelectedMonth();
-
-  //const allTransactionsFormatted = await getAllFormattedTransactions();
-  //const allTransactionsSortedByTimestamp = sortTransactionsByTimestamp(
-  //allTransactionsFormatted
-  //);
-
-  //setCsvData(allTransactionsSortedByTimestamp);
-
-  //downloadStatement();
 
   hideSpinner();
 };
@@ -197,10 +214,6 @@ const appendContentToArray = (array, content) => {
   if (content && content.data && content.data.hits.hits) {
     content.data.hits.hits.map((row) => array.push(row));
   }
-};
-
-const hasAnyTransactions = (array) => {
-  return array.data.hits.hits.length > 0;
 };
 
 const isArrayFull = (array) => {
@@ -391,9 +404,11 @@ const getComplexBody = (startTimestamp, endTimestamp, address) => {
 };
 
 const sortTransactionsByTimestamp = (transactions) => {
-  return transactions.sort((element1, element2) => {
-    return element2.timestamp.localeCompare(element1.timestamp);
-  });
+  if (transactions) {
+    return transactions.sort((element1, element2) => {
+      return element2.timestamp.localeCompare(element1.timestamp);
+    });
+  }
 };
 
 const downloadStatement = () => {
@@ -404,7 +419,7 @@ const downloadStatement = () => {
   link.setAttribute("download", "Statement.csv");
   document.body.appendChild(link);
 
-  //link.click();
+  link.click();
 };
 
 const setCsvData = (transactionsArray) => {

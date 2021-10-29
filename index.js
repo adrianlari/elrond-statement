@@ -2,10 +2,11 @@ import "regenerator-runtime/runtime";
 import axios from "axios";
 import * as constants from "./constants";
 
-var inputAddress = document.getElementById("address");
-var btnGetStatement = document.getElementById("btnGetStatement");
-var divError = document.getElementById("errorMessage");
-var lookupMonths = document.getElementById("months");
+const inputAddress = document.getElementById("address");
+const btnGetStatement = document.getElementById("btnGetStatement");
+const divError = document.getElementById("errorMessage");
+const lookupMonths = document.getElementById("months");
+const errorMsg = document.getElementById("error");
 
 let csvData = "";
 let address;
@@ -23,7 +24,7 @@ lookupMonths.onchange = async () => setTimestamps();
 btnGetStatement.onclick = async () => getStatement();
 
 const setTimestamps = async () => {
-  startTimestamp = lookupMonths.value;
+  startTimestamp = parseInt(lookupMonths.value);
 
   const initialTimestampOfSelectedMonth = new Date(startTimestamp * 1000);
 
@@ -138,6 +139,9 @@ const getAllRecordsSelectedMonth = async (body, txType) => {
 };
 
 const getAllTransactionsForSelectedMonth = async () => {
+  startTimestamp += constants.GMT_SECONDS_DIFFERCE;
+  endTimestamp += constants.GMT_SECONDS_DIFFERCE;
+
   const body = getComplexBody(startTimestamp, endTimestamp, address);
 
   const allTransactionsRaw = await getAllRecordsSelectedMonth(
@@ -160,7 +164,9 @@ const getAllTransactionsForSelectedMonth = async () => {
     constants.transactionTypes.RESULT
   ).filter(
     (x) =>
-      x._source && x._source.data && !x._source.data.startsWith(constants.ok)
+      x.action === constants.actionTypes.RECEIVED &&
+      x.data &&
+      !x.data.startsWith(constants.ok)
   );
 
   return allTransactionsFormatted.concat(allScResultsFormatted);
@@ -169,10 +175,6 @@ const getAllTransactionsForSelectedMonth = async () => {
 const getStatementForSelectedMonth = async () => {
   const allTransactionsSelectedMonth =
     await getAllTransactionsForSelectedMonth();
-
-  if (!allTransactionsSelectedMonth || !allTransactionsSelectedMonth.lenght) {
-    return;
-  }
 
   const allSortedTransactionsSelectedMonth = sortTransactionsByTimestamp(
     allTransactionsSelectedMonth
@@ -199,7 +201,8 @@ const getStatement = async () => {
   }
 
   if (!lookupMonths.value) {
-    divError.textContent = "Please select a month.";
+    errorMsg.classList.toggle("d-block");
+    errorMsg.textContent = "Please select a month.";
     return;
   }
 
@@ -416,7 +419,7 @@ const downloadStatement = () => {
   var url = URL.createObjectURL(blob);
   var link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", "Statement.csv");
+  link.setAttribute("download", `${constants.months[selectedMonthNumber]}.csv`);
   document.body.appendChild(link);
 
   link.click();

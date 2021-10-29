@@ -24,6 +24,7 @@ export const baseUrl = config.indexUrl;
 export const url = `${baseUrl}/transactions/_search?scroll=1m`;
 export const urlScTransactions = `${baseUrl}/scresults/_search?scroll=1m`;
 
+export const GMT_SECONDS_DIFFERCE = 10800;
 export const noIndexUrl = `${baseUrl}/_search/scroll`;
 export const MAXIMUM_NUMBER_OF_ROWS = 10000;
 export const ok = "QDZmNm";
